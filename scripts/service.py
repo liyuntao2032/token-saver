@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Token节约大师 V2.0 - 优化版本
-1. 控制压缩率不超过70%
-2. 保留最近10条消息
-3. 白名单机制保护重要会话
+Token节约大师 V2.1 - 真正节约tokens的版本
+生成OpenClaw兼容的JSONL格式，替换原始session
 """
 
 import os
@@ -11,6 +9,7 @@ import sys
 import json
 import time
 import signal
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
@@ -18,7 +17,7 @@ import re
 
 
 class BackgroundService:
-    """后台服务 - 优化版本"""
+    """后台服务 - 真正节约tokens的版本"""
     
     def __init__(self, config_file: str = 'config.json'):
         self.config = self._load_config(config_file)
@@ -30,6 +29,10 @@ class BackgroundService:
         self.sessions_dir = Path.home() / '.openclaw' / 'agents' / 'main' / 'sessions'
         self.compressed_dir = Path(__file__).parent / 'compressed'
         self.compressed_dir.mkdir(exist_ok=True)
+        
+        # 备份目录
+        self.backup_dir = Path(__file__).parent / 'backups'
+        self.backup_dir.mkdir(exist_ok=True)
         
         # 白名单缓存
         self.whitelist_cache = {}
@@ -43,7 +46,7 @@ class BackgroundService:
             return False
         
         print("=" * 70)
-        print("🚀 Token节约大师 V2.0 - 优化版本")
+        print("🚀 Token节约大师 V2.1 - 真正节约tokens的版本")
         print("=" * 70)
         print(f"触发阈值: {self.config.get('threshold', 10000):,} tokens")
         print(f"检查间隔: {self.config.get('interval', 120)} 秒")
@@ -52,6 +55,7 @@ class BackgroundService:
         print(f"白名单: {'启用' if self.config.get('whitelist', {}).get('enabled', True) else '禁用'}")
         print(f"Session目录: {self.sessions_dir}")
         print(f"压缩输出: {self.compressed_dir}")
+        print(f"备份目录: {self.backup_dir}")
         print("=" * 70)
         
         # 保存PID
@@ -103,7 +107,7 @@ class BackgroundService:
     
     def _main_loop(self):
         """主循环"""
-        self._log("后台服务启动 - 优化版本")
+        self._log("后台服务启动 - V2.1 真正节约tokens版本")
         
         try:
             check_count = 0
@@ -134,6 +138,7 @@ class BackgroundService:
                             if result:
                                 self._log(f"✅ 压缩完成: {result['stats']['saved_tokens']} tokens "
                                         f"(压缩率 {result['stats']['compression_ratio']:.1f}%)")
+                                self._log(f"✅ 已替换原始session，节约tokens生效！")
                             else:
                                 self._log(f"❌ 压缩失败")
                 else:
@@ -234,7 +239,7 @@ class BackgroundService:
             return 0
     
     def _compress_session(self, session_file: Path, original_tokens: int) -> Optional[Dict[str, Any]]:
-        """压缩session - 智能压缩率控制"""
+        """压缩session - 真正替换原始文件"""
         try:
             # 读取session内容
             messages = self._read_session_messages(session_file)
@@ -258,16 +263,30 @@ class BackgroundService:
                 preserve_keywords=compression_settings.get('preserve_keywords', []),
                 target_tokens=target_tokens
             )
+            
+            # 1. 生成压缩摘要
             compressed_text = compressor.compress_adaptive(messages)
             
-            # 计算压缩后tokens
-            compressed_tokens = len(compressed_text) // 2
+            # 2. 生成OpenClaw兼容的JSONL
+            compressed_jsonl = self._generate_compressed_jsonl(messages, compressed_text, keep_recent)
             
-            # 保存压缩结果
+            # 3. 计算压缩后tokens
+            compressed_tokens = len(compressed_jsonl) // 2
+            
+            # 4. 备份原始文件
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            compressed_file = self.compressed_dir / f"{session_file.stem}_{timestamp}.txt"
+            backup_file = self.backup_dir / f"{session_file.stem}_{timestamp}.jsonl.backup"
+            shutil.copy2(session_file, backup_file)
+            self._log(f"✅ 已备份原始session: {backup_file.name}")
             
-            with open(compressed_file, 'w', encoding='utf-8') as f:
+            # 5. 替换为压缩版本
+            with open(session_file, 'w', encoding='utf-8') as f:
+                f.write(compressed_jsonl)
+            self._log(f"✅ 已替换原始session为压缩版本")
+            
+            # 6. 保存压缩报告
+            report_file = self.compressed_dir / f"{session_file.stem}_{timestamp}_report.txt"
+            with open(report_file, 'w', encoding='utf-8') as f:
                 f.write(compressed_text)
                 f.write(f"\n\n--- 压缩统计 ---\n")
                 f.write(f"原始tokens: {original_tokens}\n")
@@ -277,9 +296,11 @@ class BackgroundService:
                 f.write(f"最大允许压缩率: {max_ratio * 100}%\n")
                 f.write(f"保留消息数: {keep_recent}\n")
                 f.write(f"压缩时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"备份文件: {backup_file.name}\n")
             
             return {
-                'compressed_file': str(compressed_file),
+                'compressed_file': str(report_file),
+                'backup_file': str(backup_file),
                 'stats': {
                     'original_tokens': original_tokens,
                     'compressed_tokens': compressed_tokens,
@@ -293,6 +314,42 @@ class BackgroundService:
             import traceback
             self._log(traceback.format_exc())
             return None
+    
+    def _generate_compressed_jsonl(self, messages: List[Dict[str, str]], 
+                                   compressed_text: str, 
+                                   keep_recent: int) -> str:
+        """生成OpenClaw兼容的JSONL格式"""
+        jsonl_lines = []
+        
+        # 1. 添加压缩摘要作为系统消息（放在最前面）
+        jsonl_lines.append(json.dumps({
+            "type": "message",
+            "timestamp": datetime.now().isoformat() + "Z",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": f"[Token节约大师压缩摘要]\n\n{compressed_text}"
+                }]
+            }
+        }, ensure_ascii=False))
+        
+        # 2. 添加保留的消息（最近N条）
+        recent_count = min(keep_recent, len(messages))
+        for msg in messages[-recent_count:]:
+            jsonl_lines.append(json.dumps({
+                "type": "message",
+                "timestamp": msg.get('timestamp', ''),
+                "message": {
+                    "role": msg.get('role', ''),
+                    "content": [{
+                        "type": "text",
+                        "text": msg.get('content', '')
+                    }]
+                }
+            }, ensure_ascii=False))
+        
+        return '\n'.join(jsonl_lines) + '\n'
     
     def _read_session_messages(self, session_file: Path) -> List[Dict[str, str]]:
         """读取session中的消息"""
@@ -504,35 +561,6 @@ class SessionCompressor:
         
         return important
     
-    def _extract_all_important(self, messages: List[Dict[str, str]]) -> Dict[str, List[str]]:
-        """提取所有重要信息"""
-        important = {
-            'decisions': [],
-            'tasks': [],
-            'important_info': []
-        }
-        
-        for msg in messages:
-            content = msg.get('content', '')
-            
-            # 提取决策
-            if any(kw in content for kw in self.decision_keywords):
-                important['decisions'].append(self._clean_text(content, 150))
-            
-            # 提取任务
-            if any(kw in content for kw in self.task_keywords):
-                important['tasks'].append(self._clean_text(content, 150))
-            
-            # 提取重要信息
-            if any(kw in content for kw in self.important_keywords):
-                important['important_info'].append(self._clean_text(content, 150))
-        
-        # 去重
-        for key in important:
-            important[key] = list(dict.fromkeys(important[key]))[:5]
-        
-        return important
-    
     def _format_important(self, important: Dict[str, List[str]], entities: set) -> str:
         """格式化重要信息"""
         lines = []
@@ -562,15 +590,6 @@ class SessionCompressor:
         
         return '\n'.join(lines)
     
-    def _clean_text(self, text: str, max_length: int = 200) -> str:
-        """清理文本"""
-        # 移除多余空格
-        text = re.sub(r'\s+', ' ', text).strip()
-        # 限制长度
-        if len(text) > max_length:
-            text = text[:max_length] + '...'
-        return text
-    
     def _extract_entities(self, text: str) -> set:
         """提取实体"""
         entities = set()
@@ -594,7 +613,7 @@ def main():
     """主函数"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Token节约大师 V2.0 - 优化版本')
+    parser = argparse.ArgumentParser(description='Token节约大师 V2.1 - 真正节约tokens的版本')
     parser.add_argument('action', choices=['start', 'stop', 'status', 'restart', 'test'],
                        help='操作: start(启动), stop(停止), status(状态), restart(重启), test(测试)')
     
@@ -632,11 +651,13 @@ def main():
                 result = service._compress_session(current_session, token_count)
                 if result:
                     print(f"\n✅ 压缩成功！")
-                    print(f"压缩文件: {result['compressed_file']}")
+                    print(f"压缩报告: {result['compressed_file']}")
+                    print(f"备份文件: {result['backup_file']}")
                     print(f"原始tokens: {result['stats']['original_tokens']}")
                     print(f"压缩后tokens: {result['stats']['compressed_tokens']}")
                     print(f"节约tokens: {result['stats']['saved_tokens']}")
                     print(f"压缩率: {result['stats']['compression_ratio']:.1f}%")
+                    print(f"\n✅ 已替换原始session，OpenClaw下次启动会读取压缩版本！")
                 else:
                     print("❌ 压缩失败")
         else:
