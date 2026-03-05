@@ -1,0 +1,40 @@
+{
+  "threshold": 10000,
+  "interval": 120,
+  "auto_start": true,
+  "compression_ratio_target": 0.6,
+  "log_level": "INFO",
+  "features": {
+    "auto_monitor": true,
+    "smart_trigger": true,
+    "real_time_stats": true,
+    "background_service": true
+  },
+  "compression_settings": {
+    "max_compression_ratio": 0.7,
+    "keep_recent_messages": 10,
+    "preserve_keywords": [
+      "重要",
+      "决策",
+      "TODO",
+      "待办",
+      "记住",
+      "注意",
+      "关键"
+    ]
+  },
+  "whitelist": {
+    "enabled": true,
+    "session_patterns": [
+      "current",
+      "active",
+      "important"
+    ],
+    "max_session_age_hours": 2,
+    "preserve_if_contains": [
+      "Token节约大师",
+      "正在开发",
+      "正在进行"
+    ]
+  }
+}
