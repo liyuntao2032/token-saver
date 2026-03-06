@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# 运行时生成的文件
+scripts/backups/
+scripts/compressed/
+scripts/token_saver.log
+scripts/token_saver.pid
+scripts/token_saver_error.log
+scripts/compression_history.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
